@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "latest",
     "@google/generative-ai": "latest",
     "@hookform/resolvers": "^3.9.1",
     "@mendable/firecrawl-js": "latest",

@@ -35,6 +35,10 @@ export default function Home() {
     configured: boolean
     message: string
   } | null>(null)
+  const [claudeApiKeyStatus, setClaudeApiKeyStatus] = useState<{
+    configured: boolean
+    message: string
+  } | null>(null)
   const [isCheckingApiKey, setIsCheckingApiKey] = useState(true)
   const [referenceUrlCount, setReferenceUrlCount] = useState(3) // デフォルトは3つのURL
   const [error, setError] = useState<string | null>(null)
@@ -98,6 +102,11 @@ export default function Home() {
         const geminiResponse = await fetch("/api/check-gemini-api-key")
         const geminiData = await geminiResponse.json()
         setGeminiApiKeyStatus(geminiData)
+
+        // Claude APIキーの確認
+        const claudeResponse = await fetch("/api/check-claude-api-key")
+        const claudeData = await claudeResponse.json()
+        setClaudeApiKeyStatus(claudeData)
       } catch (error) {
         console.error("Error checking API keys:", error)
         setApiKeyStatus({
@@ -501,6 +510,7 @@ export default function Home() {
           <ApiKeyStatus apiName="Brave Search" checkEndpoint="/api/check-brave-api-key" />
           <ApiKeyStatus apiName="Firecrawl" checkEndpoint="/api/check-firecrawl-api-key" />
           <ApiKeyStatus apiName="Gemini" checkEndpoint="/api/check-gemini-api-key" />
+          <ApiKeyStatus apiName="Claude" checkEndpoint="/api/check-claude-api-key" />
         </div>
       )}
 
@@ -762,7 +772,7 @@ export default function Home() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="openai" value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-5">
+            <TabsList className="grid w-full grid-cols-7">
               <TabsTrigger value="openai">GPT-4o</TabsTrigger>
               <TabsTrigger value="gpt35" disabled={!apiKeyStatus?.configured}>
                 GPT-3.5
@@ -773,7 +783,13 @@ export default function Home() {
               <TabsTrigger value="gemini-light" disabled={!geminiApiKeyStatus?.configured}>
                 Gemini Light
               </TabsTrigger>
-              <TabsTrigger value="claude">Claude</TabsTrigger>
+              <TabsTrigger value="claude-sonnet" disabled={!claudeApiKeyStatus?.configured}>
+                Claude 3.7
+              </TabsTrigger>
+              <TabsTrigger value="claude-haiku" disabled={!claudeApiKeyStatus?.configured}>
+                Claude 3.5
+              </TabsTrigger>
+              <TabsTrigger value="compare">Compare</TabsTrigger>
             </TabsList>
             <TabsContent value="openai" className="mt-4">
               <p className="text-sm text-muted-foreground">
@@ -832,8 +848,47 @@ export default function Home() {
                 </Alert>
               )}
             </TabsContent>
-            <TabsContent value="claude" className="mt-4">
-              <p className="text-sm text-muted-foreground">Using Anthropic's Claude to analyze product information.</p>
+            <TabsContent value="claude-sonnet" className="mt-4">
+              <p className="text-sm text-muted-foreground">
+                Using Anthropic's Claude 3.7 Sonnet to analyze product information. High-quality analysis with strong
+                reasoning capabilities.
+              </p>
+              {!claudeApiKeyStatus?.configured && (
+                <Alert className="mt-2 bg-yellow-50 border-yellow-200">
+                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                  <AlertTitle className="text-yellow-800">Claude APIキーが設定されていません</AlertTitle>
+                  <AlertDescription className="text-yellow-700">
+                    Claude機能を使用するには、環境変数にAPIキーを設定してください。
+                  </AlertDescription>
+                </Alert>
+              )}
+            </TabsContent>
+            <TabsContent value="claude-haiku" className="mt-4">
+              <p className="text-sm text-muted-foreground">
+                Using Anthropic's Claude 3.5 Haiku to analyze product information. Fast and cost-effective with good
+                accuracy.
+              </p>
+              {!claudeApiKeyStatus?.configured && (
+                <Alert className="mt-2 bg-yellow-50 border-yellow-200">
+                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                  <AlertTitle className="text-yellow-800">Claude APIキーが設定されていません</AlertTitle>
+                  <AlertDescription className="text-yellow-700">
+                    Claude機能を使用するには、環境変数にAPIキーを設定してください。
+                  </AlertDescription>
+                </Alert>
+              )}
+            </TabsContent>
+            <TabsContent value="compare" className="mt-4">
+              <p className="text-sm text-muted-foreground">
+                Compare results from multiple AI models side by side. (Coming soon)
+              </p>
+              <Alert className="mt-2 bg-blue-50 border-blue-200">
+                <AlertCircle className="h-4 w-4 text-blue-600" />
+                <AlertTitle className="text-blue-800">開発中の機能</AlertTitle>
+                <AlertDescription className="text-blue-700">
+                  複数のAIモデルを同時に比較する機能は現在開発中です。
+                </AlertDescription>
+              </Alert>
             </TabsContent>
           </Tabs>
         </CardContent>
@@ -879,7 +934,10 @@ export default function Home() {
                 (activeTab === "openai" && !apiKeyStatus?.configured) ||
                 (activeTab === "gemini" && !geminiApiKeyStatus?.configured) ||
                 (activeTab === "gpt35" && !apiKeyStatus?.configured) ||
-                (activeTab === "gemini-light" && !geminiApiKeyStatus?.configured)
+                (activeTab === "gemini-light" && !geminiApiKeyStatus?.configured) ||
+                (activeTab === "claude-sonnet" && !claudeApiKeyStatus?.configured) ||
+                (activeTab === "claude-haiku" && !claudeApiKeyStatus?.configured) ||
+                activeTab === "compare"
               }
               className="w-full"
             >
