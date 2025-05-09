@@ -31,6 +31,10 @@ export default function Home() {
     configured: boolean
     message: string
   } | null>(null)
+  const [geminiApiKeyStatus, setGeminiApiKeyStatus] = useState<{
+    configured: boolean
+    message: string
+  } | null>(null)
   const [isCheckingApiKey, setIsCheckingApiKey] = useState(true)
   const [referenceUrlCount, setReferenceUrlCount] = useState(3) // デフォルトは3つのURL
   const [error, setError] = useState<string | null>(null)
@@ -89,6 +93,11 @@ export default function Home() {
         const firecrawlResponse = await fetch("/api/check-firecrawl-api-key")
         const firecrawlData = await firecrawlResponse.json()
         setFirecrawlApiKeyStatus(firecrawlData)
+
+        // Gemini APIキーの確認
+        const geminiResponse = await fetch("/api/check-gemini-api-key")
+        const geminiData = await geminiResponse.json()
+        setGeminiApiKeyStatus(geminiData)
       } catch (error) {
         console.error("Error checking API keys:", error)
         setApiKeyStatus({
@@ -491,6 +500,7 @@ export default function Home() {
           <ApiKeyStatus apiName="OpenAI" checkEndpoint="/api/check-api-key" />
           <ApiKeyStatus apiName="Brave Search" checkEndpoint="/api/check-brave-api-key" />
           <ApiKeyStatus apiName="Firecrawl" checkEndpoint="/api/check-firecrawl-api-key" />
+          <ApiKeyStatus apiName="Gemini" checkEndpoint="/api/check-gemini-api-key" />
         </div>
       )}
 
@@ -751,22 +761,79 @@ export default function Home() {
           <CardDescription>Choose which AI model to use for product research</CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="openai" onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="openai">OpenAI</TabsTrigger>
+          <Tabs defaultValue="openai" value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="grid w-full grid-cols-5">
+              <TabsTrigger value="openai">GPT-4o</TabsTrigger>
+              <TabsTrigger value="gpt35" disabled={!apiKeyStatus?.configured}>
+                GPT-3.5
+              </TabsTrigger>
+              <TabsTrigger value="gemini" disabled={!geminiApiKeyStatus?.configured}>
+                Gemini 2.0
+              </TabsTrigger>
+              <TabsTrigger value="gemini-light" disabled={!geminiApiKeyStatus?.configured}>
+                Gemini Light
+              </TabsTrigger>
               <TabsTrigger value="claude">Claude</TabsTrigger>
-              <TabsTrigger value="gemini">Gemini</TabsTrigger>
             </TabsList>
             <TabsContent value="openai" className="mt-4">
               <p className="text-sm text-muted-foreground">
-                Using OpenAI's deep research capabilities to analyze product information.
+                Using OpenAI's GPT-4o for high-quality product information analysis.
               </p>
+              {!apiKeyStatus?.configured && (
+                <Alert className="mt-2 bg-yellow-50 border-yellow-200">
+                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                  <AlertTitle className="text-yellow-800">OpenAI APIキーが設定されていません</AlertTitle>
+                  <AlertDescription className="text-yellow-700">
+                    OpenAI機能を使用するには、環境変数にAPIキーを設定してください。
+                  </AlertDescription>
+                </Alert>
+              )}
+            </TabsContent>
+            <TabsContent value="gpt35" className="mt-4">
+              <p className="text-sm text-muted-foreground">
+                Using OpenAI's GPT-3.5 Turbo to analyze product information. Faster and more cost-effective.
+              </p>
+              {!apiKeyStatus?.configured && (
+                <Alert className="mt-2 bg-yellow-50 border-yellow-200">
+                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                  <AlertTitle className="text-yellow-800">OpenAI APIキーが設定されていません</AlertTitle>
+                  <AlertDescription className="text-yellow-700">
+                    GPT-3.5機能を使用するには、環境変数にAPIキーを設定してください。
+                  </AlertDescription>
+                </Alert>
+              )}
+            </TabsContent>
+
+            <TabsContent value="gemini" className="mt-4">
+              <p className="text-sm text-muted-foreground">
+                Using Google's Gemini 2.0 Flash to analyze product information.
+              </p>
+              {!geminiApiKeyStatus?.configured && (
+                <Alert className="mt-2 bg-yellow-50 border-yellow-200">
+                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                  <AlertTitle className="text-yellow-800">Gemini APIキーが設定されていません</AlertTitle>
+                  <AlertDescription className="text-yellow-700">
+                    Gemini機能を使用するには、環境変数にAPIキーを設定してください。
+                  </AlertDescription>
+                </Alert>
+              )}
+            </TabsContent>
+            <TabsContent value="gemini-light" className="mt-4">
+              <p className="text-sm text-muted-foreground">
+                Using Google's Gemini 2.0 Flash Light to analyze product information. Faster and more cost-effective.
+              </p>
+              {!geminiApiKeyStatus?.configured && (
+                <Alert className="mt-2 bg-yellow-50 border-yellow-200">
+                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                  <AlertTitle className="text-yellow-800">Gemini APIキーが設定されていません</AlertTitle>
+                  <AlertDescription className="text-yellow-700">
+                    Gemini機能を使用するには、環境変数にAPIキーを設定してください。
+                  </AlertDescription>
+                </Alert>
+              )}
             </TabsContent>
             <TabsContent value="claude" className="mt-4">
               <p className="text-sm text-muted-foreground">Using Anthropic's Claude to analyze product information.</p>
-            </TabsContent>
-            <TabsContent value="gemini" className="mt-4">
-              <p className="text-sm text-muted-foreground">Using Google's Gemini to analyze product information.</p>
             </TabsContent>
           </Tabs>
         </CardContent>
@@ -806,7 +873,14 @@ export default function Home() {
           <CardFooter>
             <Button
               onClick={handleAnalyze}
-              disabled={isLoading || !input.trim() || !apiKeyStatus?.configured}
+              disabled={
+                isLoading ||
+                !input.trim() ||
+                (activeTab === "openai" && !apiKeyStatus?.configured) ||
+                (activeTab === "gemini" && !geminiApiKeyStatus?.configured) ||
+                (activeTab === "gpt35" && !apiKeyStatus?.configured) ||
+                (activeTab === "gemini-light" && !geminiApiKeyStatus?.configured)
+              }
               className="w-full"
             >
               {isLoading ? (
@@ -836,6 +910,60 @@ export default function Home() {
                 <TabsContent value="formatted" className="mt-4">
                   {formattedOutput && formattedOutput.productInfo ? (
                     <div className="space-y-6">
+                      {/* 基本情報セクション */}
+                      {formattedOutput.productInfo.basic && (
+                        <div>
+                          <h3 className="text-lg font-semibold mb-2">基本情報</h3>
+                          <div className="bg-gray-50 p-3 rounded-md">
+                            <dl className="divide-y divide-gray-200">
+                              {formattedOutput.productInfo.basic.fullName && (
+                                <div className="py-2 grid grid-cols-3">
+                                  <dt className="font-medium text-gray-700">製品名</dt>
+                                  <dd className="col-span-2 text-gray-700">
+                                    {formattedOutput.productInfo.basic.fullName}
+                                  </dd>
+                                </div>
+                              )}
+                              {formattedOutput.productInfo.basic.manufacturer && (
+                                <div className="py-2 grid grid-cols-3">
+                                  <dt className="font-medium text-gray-700">メーカー</dt>
+                                  <dd className="col-span-2 text-gray-700">
+                                    {formattedOutput.productInfo.basic.manufacturer}
+                                  </dd>
+                                </div>
+                              )}
+                              {formattedOutput.productInfo.basic.category && (
+                                <div className="py-2 grid grid-cols-3">
+                                  <dt className="font-medium text-gray-700">カテゴリ</dt>
+                                  <dd className="col-span-2 text-gray-700">
+                                    {formattedOutput.productInfo.basic.category}
+                                  </dd>
+                                </div>
+                              )}
+                              {formattedOutput.productInfo.basic.price && (
+                                <div className="py-2 grid grid-cols-3">
+                                  <dt className="font-medium text-gray-700">価格</dt>
+                                  <dd className="col-span-2 text-gray-700">
+                                    <div>現在価格: {formattedOutput.productInfo.basic.price.current || "情報なし"}</div>
+                                    {formattedOutput.productInfo.basic.price.original && (
+                                      <div>定価: {formattedOutput.productInfo.basic.price.original}</div>
+                                    )}
+                                  </dd>
+                                </div>
+                              )}
+                              {formattedOutput.productInfo.basic.releaseDate && (
+                                <div className="py-2 grid grid-cols-3">
+                                  <dt className="font-medium text-gray-700">発売日</dt>
+                                  <dd className="col-span-2 text-gray-700">
+                                    {formattedOutput.productInfo.basic.releaseDate}
+                                  </dd>
+                                </div>
+                              )}
+                            </dl>
+                          </div>
+                        </div>
+                      )}
+
                       <div>
                         <h3 className="text-lg font-semibold mb-2">良い点</h3>
                         <ul className="space-y-3">
@@ -884,7 +1012,17 @@ export default function Home() {
                               <div className="py-2 grid grid-cols-3">
                                 <dt className="font-medium text-gray-700">材質</dt>
                                 <dd className="col-span-2 text-gray-700">
-                                  {formattedOutput.productInfo.specifications.materials.join(", ")}
+                                  {Array.isArray(formattedOutput.productInfo.specifications.materials)
+                                    ? formattedOutput.productInfo.specifications.materials.join(", ")
+                                    : formattedOutput.productInfo.specifications.materials}
+                                </dd>
+                              </div>
+                            )}
+                            {formattedOutput.productInfo.specifications.powerSource && (
+                              <div className="py-2 grid grid-cols-3">
+                                <dt className="font-medium text-gray-700">電源</dt>
+                                <dd className="col-span-2 text-gray-700">
+                                  {formattedOutput.productInfo.specifications.powerSource}
                                 </dd>
                               </div>
                             )}
@@ -892,7 +1030,17 @@ export default function Home() {
                               <div className="py-2 grid grid-cols-3">
                                 <dt className="font-medium text-gray-700">規格</dt>
                                 <dd className="col-span-2 text-gray-700">
-                                  {formattedOutput.productInfo.specifications.standards.join(", ")}
+                                  {Array.isArray(formattedOutput.productInfo.specifications.standards)
+                                    ? formattedOutput.productInfo.specifications.standards.join(", ")
+                                    : formattedOutput.productInfo.specifications.standards}
+                                </dd>
+                              </div>
+                            )}
+                            {formattedOutput.productInfo.specifications.warranty && (
+                              <div className="py-2 grid grid-cols-3">
+                                <dt className="font-medium text-gray-700">保証</dt>
+                                <dd className="col-span-2 text-gray-700">
+                                  {formattedOutput.productInfo.specifications.warranty}
                                 </dd>
                               </div>
                             )}
@@ -908,6 +1056,44 @@ export default function Home() {
                           </dl>
                         </div>
                       </div>
+
+                      {/* メタ情報セクション */}
+                      {formattedOutput.productInfo.metaInfo && (
+                        <div>
+                          <h3 className="text-lg font-semibold mb-2">メタ情報</h3>
+                          <div className="bg-gray-50 p-3 rounded-md">
+                            <dl className="divide-y divide-gray-200">
+                              {formattedOutput.productInfo.metaInfo.extractionDate && (
+                                <div className="py-2 grid grid-cols-3">
+                                  <dt className="font-medium text-gray-700">抽出日時</dt>
+                                  <dd className="col-span-2 text-gray-700">
+                                    {formattedOutput.productInfo.metaInfo.extractionDate}
+                                  </dd>
+                                </div>
+                              )}
+                              {formattedOutput.productInfo.metaInfo.sourceUrls && (
+                                <div className="py-2 grid grid-cols-3">
+                                  <dt className="font-medium text-gray-700">情報源</dt>
+                                  <dd className="col-span-2 text-gray-700">
+                                    <ul className="list-disc pl-5">
+                                      {Array.isArray(formattedOutput.productInfo.metaInfo.sourceUrls) &&
+                                        formattedOutput.productInfo.metaInfo.sourceUrls.map(
+                                          (url: string, i: number) => (
+                                            <li key={i} className="text-blue-600 hover:underline break-all">
+                                              <a href={url} target="_blank" rel="noopener noreferrer">
+                                                {url}
+                                              </a>
+                                            </li>
+                                          ),
+                                        )}
+                                    </ul>
+                                  </dd>
+                                </div>
+                              )}
+                            </dl>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="text-center py-12 text-gray-500">
