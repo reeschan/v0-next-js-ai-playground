@@ -1,102 +1,161 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { AlertCircle, AlertTriangle } from "lucide-react"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { useState } from "react"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { Slider } from "@/components/ui/slider"
+import { Button } from "@/components/ui/button"
+import { ChevronDown, ChevronUp } from "lucide-react"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+
+export interface DeepResearchParams {
+  maxDepth: number
+  timeLimit: number
+  maxUrls: number
+}
 
 interface SearchEngineSelectorProps {
   onEngineChange: (engine: string) => void
+  onDeepResearchChange: (enabled: boolean) => void
+  onDeepResearchParamsChange: (params: DeepResearchParams) => void
   defaultEngine?: string
+  defaultDeepResearch?: boolean
+  defaultDeepResearchParams?: DeepResearchParams
 }
 
-export function SearchEngineSelector({ onEngineChange, defaultEngine = "duckduckgo" }: SearchEngineSelectorProps) {
+export function SearchEngineSelector({
+  onEngineChange,
+  onDeepResearchChange,
+  onDeepResearchParamsChange,
+  defaultEngine = "duckduckgo",
+  defaultDeepResearch = false,
+  defaultDeepResearchParams = { maxDepth: 5, timeLimit: 180, maxUrls: 15 },
+}: SearchEngineSelectorProps) {
   const [selectedEngine, setSelectedEngine] = useState(defaultEngine)
-  const [braveApiKeyStatus, setBraveApiKeyStatus] = useState<{
-    configured: boolean
-    message: string
-    rateLimited?: boolean
-  } | null>(null)
-  const [isCheckingBraveApiKey, setIsCheckingBraveApiKey] = useState(true)
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(defaultDeepResearch)
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
+  const [deepResearchParams, setDeepResearchParams] = useState<DeepResearchParams>(defaultDeepResearchParams)
 
-  useEffect(() => {
-    const checkBraveApiKey = async () => {
-      try {
-        const response = await fetch("/api/check-brave-api-key")
-        const data = await response.json()
-        setBraveApiKeyStatus(data)
-
-        // レート制限に達している場合は自動的にDuckDuckGoに切り替え
-        if (data.rateLimited && selectedEngine === "brave") {
-          setSelectedEngine("duckduckgo")
-          onEngineChange("duckduckgo")
-          localStorage.setItem("preferredSearchEngine", "duckduckgo")
-        }
-      } catch (error) {
-        console.error("Error checking Brave API key:", error)
-        setBraveApiKeyStatus({
-          configured: false,
-          message: "Error checking Brave Search API key configuration",
-        })
-      } finally {
-        setIsCheckingBraveApiKey(false)
-      }
-    }
-
-    checkBraveApiKey()
-  }, [onEngineChange, selectedEngine])
-
-  // useEffectを追加して、ローカルストレージから検索エンジン設定を読み込む
-  useEffect(() => {
-    // ローカルストレージから検索エンジン設定を読み込む
-    const savedEngine = localStorage.getItem("preferredSearchEngine")
-    if (savedEngine) {
-      setSelectedEngine(savedEngine)
-      onEngineChange(savedEngine)
-    }
-  }, [onEngineChange])
-
-  // handleEngineChangeを更新して、選択をローカルストレージに保存
   const handleEngineChange = (value: string) => {
-    // レート制限に達している場合はBrave Searchを選択できないようにする
-    if (value === "brave" && braveApiKeyStatus?.rateLimited) {
-      return
-    }
-
     setSelectedEngine(value)
     onEngineChange(value)
-    // ローカルストレージに保存
-    localStorage.setItem("preferredSearchEngine", value)
+  }
+
+  const handleDeepResearchChange = (checked: boolean) => {
+    setDeepResearchEnabled(checked)
+    onDeepResearchChange(checked)
+  }
+
+  const updateDeepResearchParams = (key: keyof DeepResearchParams, value: number) => {
+    const newParams = { ...deepResearchParams, [key]: value }
+    setDeepResearchParams(newParams)
+    onDeepResearchParamsChange(newParams)
   }
 
   return (
     <div className="space-y-4">
-      <Tabs defaultValue={selectedEngine} onValueChange={handleEngineChange} className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="duckduckgo">DuckDuckGo</TabsTrigger>
-          <TabsTrigger value="brave" disabled={!braveApiKeyStatus?.configured || braveApiKeyStatus?.rateLimited}>
+      <RadioGroup
+        defaultValue={defaultEngine}
+        value={selectedEngine}
+        onValueChange={handleEngineChange}
+        className="flex flex-wrap gap-4"
+      >
+        <div className="flex items-center space-x-2">
+          <RadioGroupItem value="duckduckgo" id="duckduckgo" />
+          <Label htmlFor="duckduckgo" className="cursor-pointer">
+            DuckDuckGo
+          </Label>
+        </div>
+        <div className="flex items-center space-x-2">
+          <RadioGroupItem value="brave" id="brave" />
+          <Label htmlFor="brave" className="cursor-pointer">
             Brave Search
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+          </Label>
+        </div>
+        <div className="flex items-center space-x-2">
+          <RadioGroupItem value="firecrawl" id="firecrawl" />
+          <Label htmlFor="firecrawl" className="cursor-pointer">
+            Firecrawl
+          </Label>
+        </div>
+      </RadioGroup>
 
-      {selectedEngine === "brave" && !braveApiKeyStatus?.configured && !isCheckingBraveApiKey && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>API Key Not Configured</AlertTitle>
-          <AlertDescription>
-            {braveApiKeyStatus?.message ||
-              "Brave Search API key is not configured. Please add your API key to the environment variables as BRAVE_SEARCH_API_KEY."}
-          </AlertDescription>
-        </Alert>
-      )}
+      {selectedEngine === "firecrawl" && (
+        <div className="pl-4 border-l-2 border-gray-200 space-y-4">
+          <div className="flex items-center space-x-2">
+            <Switch id="deep-research" checked={deepResearchEnabled} onCheckedChange={handleDeepResearchChange} />
+            <Label htmlFor="deep-research" className="cursor-pointer">
+              Deep Research モード
+            </Label>
+          </div>
 
-      {braveApiKeyStatus?.rateLimited && (
-        <Alert variant="warning" className="bg-yellow-50 border-yellow-200">
-          <AlertTriangle className="h-4 w-4 text-yellow-600" />
-          <AlertTitle className="text-yellow-800">Brave Search API Rate Limited</AlertTitle>
-          <AlertDescription className="text-yellow-700">{braveApiKeyStatus.message}</AlertDescription>
-        </Alert>
+          {deepResearchEnabled && (
+            <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen} className="bg-gray-50 p-3 rounded-md">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">詳細設定</Label>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+                    {isAdvancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </Button>
+                </CollapsibleTrigger>
+              </div>
+
+              <CollapsibleContent className="space-y-4 mt-2">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="max-depth" className="text-xs">
+                      最大深度: {deepResearchParams.maxDepth}
+                    </Label>
+                    <span className="text-xs text-gray-500">1-10</span>
+                  </div>
+                  <Slider
+                    id="max-depth"
+                    min={1}
+                    max={10}
+                    step={1}
+                    value={[deepResearchParams.maxDepth]}
+                    onValueChange={(value) => updateDeepResearchParams("maxDepth", value[0])}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="time-limit" className="text-xs">
+                      時間制限: {deepResearchParams.timeLimit}秒
+                    </Label>
+                    <span className="text-xs text-gray-500">30-300秒</span>
+                  </div>
+                  <Slider
+                    id="time-limit"
+                    min={30}
+                    max={300}
+                    step={30}
+                    value={[deepResearchParams.timeLimit]}
+                    onValueChange={(value) => updateDeepResearchParams("timeLimit", value[0])}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="max-urls" className="text-xs">
+                      最大URL数: {deepResearchParams.maxUrls}
+                    </Label>
+                    <span className="text-xs text-gray-500">5-30</span>
+                  </div>
+                  <Slider
+                    id="max-urls"
+                    min={5}
+                    max={30}
+                    step={5}
+                    value={[deepResearchParams.maxUrls]}
+                    onValueChange={(value) => updateDeepResearchParams("maxUrls", value[0])}
+                  />
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </div>
       )}
     </div>
   )

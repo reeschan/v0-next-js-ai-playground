@@ -1,12 +1,12 @@
 export async function GET() {
   try {
-    const apiKey = process.env.OPENAI_API_KEY
+    const apiKey = process.env.FIRECRAWL_API_KEY
 
     if (!apiKey) {
       return new Response(
         JSON.stringify({
           configured: false,
-          message: "OpenAI APIキーが設定されていません",
+          message: "Firecrawl APIキーが設定されていません",
         }),
         {
           status: 200,
@@ -18,7 +18,7 @@ export async function GET() {
     return new Response(
       JSON.stringify({
         configured: true,
-        message: "OpenAI APIキーが設定されています",
+        message: "Firecrawl APIキーが設定されています",
       }),
       {
         status: 200,
@@ -26,7 +26,7 @@ export async function GET() {
       },
     )
   } catch (error) {
-    console.error("Error checking OpenAI API key:", error)
+    console.error("Error checking Firecrawl API key:", error)
     return new Response(
       JSON.stringify({
         configured: false,

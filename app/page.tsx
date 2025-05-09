@@ -5,15 +5,22 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Loader2, AlertCircle, ExternalLink, Clock, DollarSign, Hash, Search, AlertTriangle } from "lucide-react"
+import { Loader2, AlertCircle, Search, AlertTriangle } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SearchResults } from "@/components/search-results"
 import { SearchLogs } from "@/components/search-logs"
-import { SearchEngineSelector } from "@/components/search-engine-selector"
 import { ApiKeyStatus } from "@/components/api-key-status"
 import { Badge } from "@/components/ui/badge"
+import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+// 以下のインポートを追加
+import type { DeepResearchParams } from "@/components/search-engine-selector"
+import { DeepResearchProgress } from "@/components/deep-research-progress"
+import { DeepResearchResults } from "@/components/deep-research-results"
+import { ChevronUp, ChevronDown } from "lucide-react"
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState("openai")
@@ -40,26 +47,60 @@ export default function Home() {
   const [actualSearchEngine, setActualSearchEngine] = useState<string | null>(null)
   // フォールバックの理由を追跡
   const [fallbackReason, setFallbackReason] = useState<string | null>(null)
+  // 処理時間の追跡用の状態変数
+  const [aiProcessingTime, setAiProcessingTime] = useState<number>(0)
+  const [totalProcessingTime, setTotalProcessingTime] = useState<number>(0)
+  // 生のレスポンスデータを保存する状態変数を追加
+  const [rawResponse, setRawResponse] = useState<any>(null)
+  // useState部分に以下の状態変数を追加（既存のuseState宣言の近くに追加）
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
+  const [deepResearchParams, setDeepResearchParams] = useState<DeepResearchParams>({
+    maxDepth: 5,
+    timeLimit: 180,
+    maxUrls: 15,
+  })
+  const [deepResearchJobId, setDeepResearchJobId] = useState<string | null>(null)
+  const [deepResearchResult, setDeepResearchResult] = useState<any>(null)
+  const [deepResearchStartTime, setDeepResearchStartTime] = useState<number>(0)
+  const [deepResearchCompleted, setDeepResearchCompleted] = useState(false)
+  const [deepResearchElapsedTime, setDeepResearchElapsedTime] = useState(0)
+  // Firecrawl APIキーの状態を追加
+  const [firecrawlApiKeyStatus, setFirecrawlApiKeyStatus] = useState<{
+    configured: boolean
+    message: string
+  } | null>(null)
+  // Deep Research設定パネルの状態
+  const [isDeepResearchSettingsOpen, setIsDeepResearchSettingsOpen] = useState(false)
 
   // Check API key status on component mount
   useEffect(() => {
-    const checkApiKey = async () => {
+    const checkApiKeys = async () => {
       try {
-        const response = await fetch("/api/check-api-key")
-        const data = await response.json()
-        setApiKeyStatus(data)
+        // OpenAI APIキーの確認
+        const openaiResponse = await fetch("/api/check-api-key")
+        const openaiData = await openaiResponse.json()
+        setApiKeyStatus(openaiData)
+
+        // Brave Search APIキーの確認
+        const braveResponse = await fetch("/api/check-brave-api-key")
+        const braveData = await braveResponse.json()
+
+        // Firecrawl APIキーの確認
+        const firecrawlResponse = await fetch("/api/check-firecrawl-api-key")
+        const firecrawlData = await firecrawlResponse.json()
+        setFirecrawlApiKeyStatus(firecrawlData)
       } catch (error) {
-        console.error("Error checking API key:", error)
+        console.error("Error checking API keys:", error)
         setApiKeyStatus({
           configured: false,
-          message: "Error checking API key configuration",
+          message: "APIキーの確認中にエラーが発生しました",
         })
       } finally {
         setIsCheckingApiKey(false)
       }
     }
 
-    checkApiKey()
+    checkApiKeys()
   }, [])
 
   // Parse and format the output when it changes
@@ -86,7 +127,15 @@ export default function Home() {
     }
   }, [output])
 
-  // handleSearch関数を更新して、選択された検索エンジンに基づいて検索を実行
+  // Deep Researchパラメータを更新する関数
+  const updateDeepResearchParam = (key: keyof DeepResearchParams, value: number) => {
+    setDeepResearchParams((prev) => ({
+      ...prev,
+      [key]: value,
+    }))
+  }
+
+  // handleSearch関数を以下のコードに置き換え
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
 
@@ -97,18 +146,131 @@ export default function Home() {
     setError(null)
     setActualSearchEngine(null)
     setFallbackReason(null)
+    setRawResponse(null)
+    setDeepResearchJobId(null)
+    setDeepResearchResult(null)
+    setDeepResearchCompleted(false)
+    setDeepResearchElapsedTime(0)
 
     try {
       // 選択された検索エンジンに基づいてAPIエンドポイントを決定
-      const apiEndpoint = searchEngine === "brave" ? "/api/brave-search" : "/api/search"
+      let apiEndpoint = "/api/search"
+      if (searchEngine === "brave") {
+        apiEndpoint = "/api/brave-search"
+      } else if (searchEngine === "firecrawl") {
+        apiEndpoint = "/api/firecrawl-search"
+      }
 
-      const response = await fetch(`${apiEndpoint}?q=${encodeURIComponent(searchQuery)}`)
+      // クエリパラメータを構築
+      const queryParams = new URLSearchParams({
+        q: searchQuery,
+      })
+
+      // Firecrawlの場合、Deep Research関連のパラメータを追加
+      if (searchEngine === "firecrawl" && deepResearchEnabled) {
+        queryParams.append("deepResearch", "true")
+        queryParams.append("maxDepth", deepResearchParams.maxDepth.toString())
+        queryParams.append("timeLimit", deepResearchParams.timeLimit.toString())
+        queryParams.append("maxUrls", deepResearchParams.maxUrls.toString())
+
+        // Deep Researchの開始時間を記録
+        setDeepResearchStartTime(Date.now())
+      }
+
+      console.log(`検索リクエスト: ${apiEndpoint}?${queryParams.toString()}`)
+      const response = await fetch(`${apiEndpoint}?${queryParams.toString()}`)
+
+      // レスポンスが成功したかどうかをチェック
+      if (!response.ok) {
+        let errorMessage = `検索エンジンからのエラーレスポンス: ${response.status} ${response.statusText}`
+        try {
+          // エラーレスポンスのテキストを取得
+          const errorText = await response.text()
+          console.error("Error response text:", errorText)
+
+          // JSONとして解析できるか試みる
+          try {
+            const errorJson = JSON.parse(errorText)
+            if (errorJson.error) {
+              errorMessage = errorJson.error
+            }
+          } catch (jsonError) {
+            // JSONとして解析できない場合はテキストをそのまま使用
+            errorMessage = `${errorMessage} - ${errorText}`
+          }
+        } catch (textError) {
+          console.error("Error getting response text:", textError)
+        }
+
+        setError(errorMessage)
+        setIsSearching(false)
+        return
+      }
+
+      // レスポンスがJSONかどうかを確認
+      const contentType = response.headers.get("content-type")
+      if (!contentType || !contentType.includes("application/json")) {
+        setError(`予期しないレスポンス形式: ${contentType}`)
+        setIsSearching(false)
+        return
+      }
+
       const data = await response.json()
+      console.log("検索レスポンス:", data)
 
       if (data.error) {
         setError(data.error)
+        setIsSearching(false)
+      } else if (data.authError) {
+        // 認証エラーの場合は特別なメッセージを表示
+        const engine = searchEngine === "firecrawl" ? "Firecrawl" : searchEngine === "brave" ? "Brave Search" : "検索"
+        setError(`${engine} APIの認証に失敗しました。APIキーを確認してください。モックデータを表示しています。`)
+
+        // モックデータを表示
+        if (data.results) {
+          setSearchResults(Array.isArray(data.results) ? data.results : [])
+        }
+
+        if (data.isMockData) {
+          setActualSearchEngine(`${searchEngine} (モック)`)
+        } else {
+          setActualSearchEngine(searchEngine)
+        }
+
+        setIsSearching(false)
+      } else if (data.isMockData) {
+        // モックデータの場合も通知
+        if (data.results) {
+          setSearchResults(Array.isArray(data.results) ? data.results : [])
+        }
+
+        setActualSearchEngine(`${searchEngine} (モック)`)
+        setIsSearching(false)
+
+        if (!error) {
+          const engine = searchEngine === "firecrawl" ? "Firecrawl" : searchEngine === "brave" ? "Brave Search" : "検索"
+          setError(`${engine} APIへのアクセスに問題があるため、モックデータを表示しています。`)
+        }
       } else {
-        setSearchResults(data.results)
+        // 生のレスポンスデータを保存（あれば）
+        if (data.rawResponse) {
+          setRawResponse(data.rawResponse)
+        }
+
+        // Firecrawlの場合、Deep Researchジョブの処理
+        if (searchEngine === "firecrawl" && deepResearchEnabled && data.jobId) {
+          setDeepResearchJobId(data.jobId)
+          console.log(`Deep Research ジョブID: ${data.jobId}`)
+
+          // 初期結果があれば設定
+          if (data.results) {
+            setDeepResearchResult(data.results)
+          }
+        } else {
+          // 通常の検索結果を設定
+          setSearchResults(Array.isArray(data.results) ? data.results : [])
+          setIsSearching(false)
+        }
 
         // 実際に使用された検索エンジンを追跡
         if (data.engine) {
@@ -127,13 +289,40 @@ export default function Home() {
       }
       if (data.processingTimeMs) {
         setSearchProcessingTime(data.processingTimeMs)
+
+        // 合計処理時間を更新（AI処理時間がある場合は加算）
+        const totalTime = data.processingTimeMs + (aiProcessingTime > 0 ? aiProcessingTime : 0)
+        setTotalProcessingTime(totalTime)
       }
     } catch (error) {
       console.error("Error searching:", error)
-      setError("検索中にエラーが発生しました")
-    } finally {
+      setError(`検索中にエラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`)
       setIsSearching(false)
     }
+  }
+
+  // Deep Research完了時のハンドラを追加
+  const handleDeepResearchComplete = (result: any, elapsedTime: number) => {
+    console.log("Deep Research完了:", result)
+    setDeepResearchResult(result)
+    setDeepResearchCompleted(true)
+    setDeepResearchElapsedTime(elapsedTime)
+    setIsSearching(false)
+
+    // モックデータの場合は通知
+    if (result.isMockData) {
+      console.log("モックデータを表示しています")
+      if (!error) {
+        setError("Firecrawl APIキーが設定されていないか、認証に失敗したため、モックデータを表示しています。")
+      }
+    }
+  }
+
+  // Deep Researchエラー時のハンドラを追加
+  const handleDeepResearchError = (error: string) => {
+    console.error("Deep Researchエラー:", error)
+    setError(`Deep Research処理中にエラーが発生しました: ${error}`)
+    setIsSearching(false)
   }
 
   const useUrlsForAnalysis = (urls: string[]) => {
@@ -141,9 +330,11 @@ export default function Home() {
     setInput(urls.join("\n"))
   }
 
+  // handleAnalyze関数を修正して、レスポンスの内容タイプをチェックし、JSONでない場合の処理を追加
   const handleAnalyze = async () => {
     if (!input.trim()) return
 
+    const aiStartTime = Date.now()
     setIsLoading(true)
     setOutput("")
     setError(null)
@@ -164,7 +355,84 @@ export default function Home() {
         }),
       })
 
-      const result = await response.json()
+      // レスポンスが成功したかどうかをチェック
+      if (!response.ok) {
+        let errorMessage = `分析エンジンからのエラーレスポンス: ${response.status} ${response.statusText}`
+        try {
+          // エラーレスポンスのテキストを取得
+          const errorText = await response.text()
+          console.error("Error response text:", errorText)
+
+          // HTMLかどうかをチェック
+          if (errorText.trim().startsWith("<!DOCTYPE") || errorText.trim().startsWith("<html")) {
+            errorMessage = `サーバーエラーが発生しました。ステータスコード: ${response.status}`
+            console.error("HTML error response detected:", errorText.substring(0, 200))
+          } else {
+            // JSONとして解析できるか試みる
+            try {
+              const errorJson = JSON.parse(errorText)
+              if (errorJson.error) {
+                errorMessage = errorJson.error
+              }
+            } catch (jsonError) {
+              // JSONとして解析できない場合はテキストをそのまま使用
+              errorMessage = `${errorMessage} - ${errorText}`
+            }
+          }
+        } catch (textError) {
+          console.error("Error getting response text:", textError)
+        }
+
+        setError(errorMessage)
+        setOutput(JSON.stringify({ error: errorMessage }, null, 2))
+        setIsLoading(false)
+        return
+      }
+
+      // レスポンスがJSONかどうかを確認
+      const contentType = response.headers.get("content-type")
+      if (!contentType || !contentType.includes("application/json")) {
+        const errorMessage = `予期しないレスポンス形式: ${contentType}`
+        console.error(errorMessage)
+
+        // レスポンスのテキストを取得して確認
+        const responseText = await response.text()
+        console.error("Non-JSON response:", responseText.substring(0, 200))
+
+        // HTMLかどうかをチェック
+        if (responseText.trim().startsWith("<!DOCTYPE") || responseText.trim().startsWith("<html")) {
+          setError("サーバーエラーが発生しました。HTMLレスポンスが返されました。")
+        } else {
+          setError(errorMessage)
+        }
+
+        setOutput(JSON.stringify({ error: errorMessage, responsePreview: responseText.substring(0, 100) }, null, 2))
+        setIsLoading(false)
+        return
+      }
+
+      // JSONレスポンスを解析
+      let result
+      try {
+        result = await response.json()
+      } catch (jsonError) {
+        console.error("Error parsing JSON response:", jsonError)
+        const responseText = await response.text()
+        setError(`JSONの解析に失敗しました: ${jsonError instanceof Error ? jsonError.message : "不明なエラー"}`)
+        setOutput(
+          JSON.stringify(
+            {
+              error: "JSONの解析に失敗しました",
+              details: jsonError instanceof Error ? jsonError.message : "不明なエラー",
+              responsePreview: responseText.substring(0, 100),
+            },
+            null,
+            2,
+          ),
+        )
+        setIsLoading(false)
+        return
+      }
 
       // Check if there's an error in the result
       if (result.error) {
@@ -173,10 +441,28 @@ export default function Home() {
       } else {
         setOutput(JSON.stringify(result, null, 2))
       }
+
+      // AI処理時間を記録
+      const aiEndTime = Date.now()
+      const aiTime = aiEndTime - aiStartTime
+      setAiProcessingTime(aiTime)
+
+      // 合計処理時間を計算（検索時間がある場合は加算）
+      const totalTime = aiTime + (searchProcessingTime > 0 ? searchProcessingTime : 0)
+      setTotalProcessingTime(totalTime)
     } catch (error) {
-      console.error("Error searching product:", error)
-      setError("Failed to process request")
-      setOutput(JSON.stringify({ error: "Failed to process request" }, null, 2))
+      console.error("Error analyzing product:", error)
+      setError(`リクエスト処理中にエラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`)
+      setOutput(
+        JSON.stringify(
+          {
+            error: "リクエスト処理中にエラーが発生しました",
+            details: error instanceof Error ? error.message : "不明なエラー",
+          },
+          null,
+          2,
+        ),
+      )
     } finally {
       setIsLoading(false)
     }
@@ -204,6 +490,7 @@ export default function Home() {
         <div className="space-y-4 mb-6">
           <ApiKeyStatus apiName="OpenAI" checkEndpoint="/api/check-api-key" />
           <ApiKeyStatus apiName="Brave Search" checkEndpoint="/api/check-brave-api-key" />
+          <ApiKeyStatus apiName="Firecrawl" checkEndpoint="/api/check-firecrawl-api-key" />
         </div>
       )}
 
@@ -215,73 +502,150 @@ export default function Home() {
         </Alert>
       )}
 
-      {usageInfo && (
-        <Card className="mb-6 bg-blue-50 border-blue-200">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-blue-800 text-lg">使用量情報</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white p-3 rounded-md shadow-sm">
-                <div className="flex items-center text-blue-800 mb-1">
-                  <Hash className="h-4 w-4 mr-1" />
-                  <h3 className="font-medium">トークン使用量</h3>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="text-gray-600">入力トークン:</div>
-                  <div className="font-medium text-right">{usageInfo.promptTokens.toLocaleString()}</div>
-                  <div className="text-gray-600">出力トークン:</div>
-                  <div className="font-medium text-right">{usageInfo.completionTokens.toLocaleString()}</div>
-                  <div className="text-gray-600">合計トークン:</div>
-                  <div className="font-medium text-right">{usageInfo.totalTokens.toLocaleString()}</div>
-                </div>
-              </div>
-
-              <div className="bg-white p-3 rounded-md shadow-sm">
-                <div className="flex items-center text-blue-800 mb-1">
-                  <DollarSign className="h-4 w-4 mr-1" />
-                  <h3 className="font-medium">コスト (USD)</h3>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="text-gray-600">入力コスト:</div>
-                  <div className="font-medium text-right">{formatCost(usageInfo.inputCost)}</div>
-                  <div className="text-gray-600">出力コスト:</div>
-                  <div className="font-medium text-right">{formatCost(usageInfo.outputCost)}</div>
-                  <div className="text-gray-600">合計コスト:</div>
-                  <div className="font-medium text-right">{formatCost(usageInfo.totalCost)}</div>
-                </div>
-              </div>
-
-              <div className="bg-white p-3 rounded-md shadow-sm">
-                <div className="flex items-center text-blue-800 mb-1">
-                  <Clock className="h-4 w-4 mr-1" />
-                  <h3 className="font-medium">処理情報</h3>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="text-gray-600">モデル:</div>
-                  <div className="font-medium text-right">{usageInfo.model}</div>
-                  <div className="text-gray-600">処理時間:</div>
-                  <div className="font-medium text-right">{formatTime(usageInfo.processingTimeMs)}</div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       <Card className="mb-8">
         <CardHeader>
           <CardTitle>キーワード検索</CardTitle>
           <CardDescription>検索エンジンを選択して結果URLをAI分析に使用</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* 検索エンジン選択コンポーネントを追加 */}
-          <SearchEngineSelector onEngineChange={setSearchEngine} defaultEngine={searchEngine} />
+          {/* 検索エンジン選択部分 */}
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-4">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="radio"
+                  id="duckduckgo"
+                  name="searchEngine"
+                  value="duckduckgo"
+                  checked={searchEngine === "duckduckgo"}
+                  onChange={() => setSearchEngine("duckduckgo")}
+                  className="h-4 w-4"
+                />
+                <Label htmlFor="duckduckgo" className="cursor-pointer">
+                  DuckDuckGo
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="radio"
+                  id="brave"
+                  name="searchEngine"
+                  value="brave"
+                  checked={searchEngine === "brave"}
+                  onChange={() => setSearchEngine("brave")}
+                  className="h-4 w-4"
+                />
+                <Label htmlFor="brave" className="cursor-pointer">
+                  Brave Search
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="radio"
+                  id="firecrawl"
+                  name="searchEngine"
+                  value="firecrawl"
+                  checked={searchEngine === "firecrawl"}
+                  onChange={() => setSearchEngine("firecrawl")}
+                  className="h-4 w-4"
+                />
+                <Label htmlFor="firecrawl" className="cursor-pointer">
+                  Firecrawl
+                </Label>
+              </div>
+            </div>
+          </div>
+
+          {/* Firecrawlが選択されている場合のDeep Research設定 */}
+          {searchEngine === "firecrawl" && (
+            <div className="pl-4 border-l-2 border-gray-200 space-y-4">
+              <div className="flex items-center space-x-2">
+                <Switch id="deep-research" checked={deepResearchEnabled} onCheckedChange={setDeepResearchEnabled} />
+                <Label htmlFor="deep-research" className="cursor-pointer">
+                  Deep Research モード
+                </Label>
+              </div>
+
+              {deepResearchEnabled && (
+                <Collapsible
+                  open={isDeepResearchSettingsOpen}
+                  onOpenChange={setIsDeepResearchSettingsOpen}
+                  className="bg-gray-50 p-3 rounded-md"
+                >
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">詳細設定</Label>
+                    <CollapsibleTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+                        {isDeepResearchSettingsOpen ? (
+                          <ChevronUp className="h-4 w-4" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </CollapsibleTrigger>
+                  </div>
+
+                  <CollapsibleContent className="space-y-4 mt-2">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="max-depth" className="text-xs">
+                          最大深度: {deepResearchParams.maxDepth}
+                        </Label>
+                        <span className="text-xs text-gray-500">1-10</span>
+                      </div>
+                      <Slider
+                        id="max-depth"
+                        min={1}
+                        max={10}
+                        step={1}
+                        value={[deepResearchParams.maxDepth]}
+                        onValueChange={(value) => updateDeepResearchParam("maxDepth", value[0])}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="time-limit" className="text-xs">
+                          時間制限: {deepResearchParams.timeLimit}秒
+                        </Label>
+                        <span className="text-xs text-gray-500">30-300秒</span>
+                      </div>
+                      <Slider
+                        id="time-limit"
+                        min={30}
+                        max={300}
+                        step={30}
+                        value={[deepResearchParams.timeLimit]}
+                        onValueChange={(value) => updateDeepResearchParam("timeLimit", value[0])}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="max-urls" className="text-xs">
+                          最大URL数: {deepResearchParams.maxUrls}
+                        </Label>
+                        <span className="text-xs text-gray-500">5-30</span>
+                      </div>
+                      <Slider
+                        id="max-urls"
+                        min={5}
+                        max={30}
+                        step={5}
+                        value={[deepResearchParams.maxUrls]}
+                        onValueChange={(value) => updateDeepResearchParam("maxUrls", value[0])}
+                      />
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+            </div>
+          )}
 
           {/* 検索ボタンの部分を更新して、現在の検索エンジンを表示 */}
           <div className="flex gap-2">
             <Input
-              placeholder={`${searchEngine === "brave" ? "Brave Search" : "DuckDuckGo"}で検索...`}
+              placeholder={`${searchEngine === "brave" ? "Brave Search" : searchEngine === "firecrawl" ? "Firecrawl" : "DuckDuckGo"}で検索...`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -290,6 +654,17 @@ export default function Home() {
               {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             </Button>
           </div>
+
+          {/* Firecrawl APIキーが設定されていない場合の警告 */}
+          {searchEngine === "firecrawl" && firecrawlApiKeyStatus && !firecrawlApiKeyStatus.configured && (
+            <Alert className="bg-yellow-50 border-yellow-200">
+              <AlertTriangle className="h-4 w-4 text-yellow-600" />
+              <AlertTitle className="text-yellow-800">Firecrawl APIキーが設定されていません</AlertTitle>
+              <AlertDescription className="text-yellow-700">
+                Firecrawl機能を使用するには、環境変数にAPIキーを設定してください。
+              </AlertDescription>
+            </Alert>
+          )}
 
           {/* フォールバック情報を表示 */}
           {fallbackReason && actualSearchEngine === "duckduckgo" && searchEngine === "brave" && (
@@ -302,14 +677,57 @@ export default function Home() {
             </Alert>
           )}
 
+          {/* Deep Research進行状況 */}
+          {searchEngine === "firecrawl" && deepResearchEnabled && deepResearchJobId && !deepResearchCompleted && (
+            <div className="mt-4">
+              <DeepResearchProgress
+                jobId={deepResearchJobId}
+                onComplete={handleDeepResearchComplete}
+                onError={handleDeepResearchError}
+                startTime={deepResearchStartTime}
+              />
+            </div>
+          )}
+
+          {/* Deep Research結果 */}
+          {searchEngine === "firecrawl" && deepResearchEnabled && deepResearchCompleted && deepResearchResult && (
+            <div className="mt-4">
+              <DeepResearchResults
+                result={deepResearchResult}
+                isLoading={false}
+                onUseUrls={useUrlsForAnalysis}
+                elapsedTime={deepResearchElapsedTime}
+              />
+            </div>
+          )}
+
           {/* 検索結果の上に現在の検索エンジンを表示 */}
           {(searchResults.length > 0 || isSearching) && (
             <>
               <div className="flex items-center justify-between mb-2">
-                <div className="text-sm text-gray-500 flex items-center">
+                <div className="text-sm text-gray-500 flex items-center flex-wrap gap-2">
                   検索エンジン:{" "}
-                  <Badge className="ml-2" variant={actualSearchEngine === "brave" ? "default" : "outline"}>
-                    {actualSearchEngine === "brave" ? "Brave Search" : "DuckDuckGo"}
+                  <Badge
+                    className="ml-2"
+                    variant={
+                      actualSearchEngine?.includes("モック")
+                        ? "secondary"
+                        : actualSearchEngine === "brave"
+                          ? "default"
+                          : actualSearchEngine === "firecrawl"
+                            ? "destructive"
+                            : "outline"
+                    }
+                  >
+                    {actualSearchEngine === "brave"
+                      ? "Brave Search"
+                      : actualSearchEngine === "brave (モック)"
+                        ? "Brave Search (モック)"
+                        : actualSearchEngine === "firecrawl"
+                          ? "Firecrawl"
+                          : actualSearchEngine === "firecrawl (モック)"
+                            ? "Firecrawl (モック)"
+                            : "DuckDuckGo"}
                   </Badge>
                 </div>
                 {searchResults.length > 0 && (
@@ -319,7 +737,11 @@ export default function Home() {
               <SearchResults results={searchResults} isLoading={isSearching} onUseUrls={useUrlsForAnalysis} />
             </>
           )}
-          {searchLogs.length > 0 && <SearchLogs logs={searchLogs} processingTime={searchProcessingTime} />}
+
+          {/* 生のレスポンスデータを含めるように修正 */}
+          {searchLogs.length > 0 && (
+            <SearchLogs logs={searchLogs} processingTime={searchProcessingTime} rawResponse={rawResponse} />
+          )}
         </CardContent>
       </Card>
 
@@ -373,7 +795,10 @@ export default function Home() {
                 min={1}
                 max={10}
                 value={referenceUrlCount}
-                onChange={(e) => setReferenceUrlCount(Number.parseInt(e.target.value) || 1)}
+                onChange={(e) => {
+                  const parsedValue = Number.parseInt(e.target.value)
+                  setReferenceUrlCount(Number.isNaN(parsedValue) ? 1 : parsedValue)
+                }}
               />
               <p className="text-xs text-muted-foreground">AIが分析に使用する参考URLの数を指定してください（1〜10）</p>
             </div>
@@ -483,52 +908,68 @@ export default function Home() {
                           </dl>
                         </div>
                       </div>
-
-                      <div>
-                        <h3 className="text-lg font-semibold mb-2">参考URL</h3>
-                        <ul className="space-y-1 bg-blue-50 p-3 rounded-md">
-                          {formattedOutput.productInfo.referenceUrls.map((url: string, index: number) => (
-                            <li key={`url-${index}`} className="flex items-center">
-                              <ExternalLink className="h-4 w-4 text-blue-600 mr-2" />
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline truncate"
-                              >
-                                {url}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
                     </div>
                   ) : (
-                    <div className="text-center text-gray-500 py-8">結果がここに表示されます...</div>
+                    <div className="text-center py-12 text-gray-500">
+                      {output
+                        ? "出力の解析に失敗しました。JSON表示タブを確認してください。"
+                        : "分析結果がここに表示されます。"}
+                    </div>
                   )}
                 </TabsContent>
                 <TabsContent value="raw" className="mt-4">
-                  <pre className="bg-slate-100 p-4 rounded-md overflow-auto min-h-[200px] text-sm">
-                    {output || "結果がここに表示されます..."}
+                  <pre className="bg-gray-100 p-4 rounded-md overflow-auto max-h-[500px] text-xs">
+                    {output || "分析結果がここに表示されます。"}
                   </pre>
                 </TabsContent>
               </Tabs>
             </div>
+
+            {/* 使用量情報を表示 */}
+            {usageInfo && (
+              <div className="mt-4 border-t pt-4">
+                <h3 className="text-sm font-medium mb-2">使用量情報</h3>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-gray-50 p-2 rounded">
+                    <span className="font-medium">処理時間:</span> {formatTime(aiProcessingTime)}
+                  </div>
+                  {usageInfo.total_tokens && (
+                    <div className="bg-gray-50 p-2 rounded">
+                      <span className="font-medium">トークン数:</span> {usageInfo.total_tokens.toLocaleString()}
+                    </div>
+                  )}
+                  {usageInfo.prompt_tokens && (
+                    <div className="bg-gray-50 p-2 rounded">
+                      <span className="font-medium">入力トークン:</span> {usageInfo.prompt_tokens.toLocaleString()}
+                    </div>
+                  )}
+                  {usageInfo.completion_tokens && (
+                    <div className="bg-gray-50 p-2 rounded">
+                      <span className="font-medium">出力トークン:</span> {usageInfo.completion_tokens.toLocaleString()}
+                    </div>
+                  )}
+                  {usageInfo.cost && (
+                    <div className="bg-gray-50 p-2 rounded">
+                      <span className="font-medium">コスト:</span> {formatCost(usageInfo.cost)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 合計処理時間を表示 */}
+            {totalProcessingTime > 0 && (
+              <div className="mt-4 text-xs text-gray-500">
+                合計処理時間: {formatTime(totalProcessingTime)}
+                {searchProcessingTime > 0 && aiProcessingTime > 0 && (
+                  <span>
+                    {" "}
+                    (検索: {formatTime(searchProcessingTime)}, AI: {formatTime(aiProcessingTime)})
+                  </span>
+                )}
+              </div>
+            )}
           </CardContent>
-          <CardFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (output) {
-                  navigator.clipboard.writeText(output)
-                }
-              }}
-              disabled={!output}
-              className="w-full"
-            >
-              クリップボードにコピー
-            </Button>
-          </CardFooter>
         </Card>
       </div>
     </main>

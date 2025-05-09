@@ -1,22 +1,16 @@
 "use client"
 
-import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ExternalLink, Copy, ChevronDown, ChevronUp, Clock } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { Card, CardContent } from "@/components/ui/card"
+import { Loader2, ExternalLink, Check } from "lucide-react"
+import { useState } from "react"
 
-// 検索結果の型定義を拡張
 interface SearchResult {
   title: string
   url: string
-  description: string
+  description?: string
   source?: string
-  favicon?: string | null
-  age?: string | null
-  isFamily?: boolean
-  publishedTime?: string | null
-  publisher?: string | null
+  confidence?: number
 }
 
 interface SearchResultsProps {
@@ -26,144 +20,85 @@ interface SearchResultsProps {
 }
 
 export function SearchResults({ results, isLoading, onUseUrls }: SearchResultsProps) {
-  const [showAll, setShowAll] = useState(false)
+  const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set())
+
+  const toggleUrlSelection = (url: string) => {
+    const newSelection = new Set(selectedUrls)
+    if (newSelection.has(url)) {
+      newSelection.delete(url)
+    } else {
+      newSelection.add(url)
+    }
+    setSelectedUrls(newSelection)
+  }
+
+  const handleUseSelected = () => {
+    onUseUrls(Array.from(selectedUrls))
+  }
 
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center h-40">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+      <div className="flex justify-center items-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+        <span className="ml-2 text-gray-500">検索結果を取得中...</span>
       </div>
     )
   }
 
-  if (!results || results.length === 0) {
-    return <div className="text-center py-8 text-gray-500">検索結果がありません。別のキーワードで試してください。</div>
-  }
-
-  // 表示する結果の数を決定
-  const displayResults = showAll ? results : results.slice(0, 5)
-
-  const handleUseUrls = () => {
-    // 最大5つのURLを選択
-    const urls = results.slice(0, 5).map((result) => result.url)
-    onUseUrls(urls)
-  }
-
-  // ソースに基づいて色を決定
-  const getSourceColor = (source: string) => {
-    switch (source) {
-      case "Abstract":
-        return "bg-blue-100 text-blue-800"
-      case "Results":
-        return "bg-green-100 text-green-800"
-      case "RelatedTopics":
-        return "bg-purple-100 text-purple-800"
-      case "Infobox":
-        return "bg-yellow-100 text-yellow-800"
-      case "Brave Web":
-        return "bg-orange-100 text-orange-800"
-      case "Brave News":
-        return "bg-red-100 text-red-800"
-      case "Fallback":
-        return "bg-gray-100 text-gray-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
+  if (results.length === 0 && !isLoading) {
+    return <div className="text-center py-12 text-gray-500">検索結果がありません。別のキーワードで試してください。</div>
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold">検索結果 ({results.length}件)</h3>
-        <Button onClick={handleUseUrls} size="sm" className="bg-blue-600 hover:bg-blue-700">
-          <Copy className="h-4 w-4 mr-2" />
-          上位5件をAI分析に使用
+      <div className="flex justify-between items-center mb-2">
+        <div className="text-sm text-gray-500">
+          {selectedUrls.size > 0 ? `${selectedUrls.size}件選択中` : "URLを選択してください"}
+        </div>
+        <Button size="sm" onClick={handleUseSelected} disabled={selectedUrls.size === 0} className="text-xs">
+          選択したURLを使用
         </Button>
       </div>
 
       <div className="space-y-3">
-        {displayResults.map((result, index) => (
+        {results.map((result, index) => (
           <Card key={index} className="overflow-hidden">
-            <CardHeader className="py-3 px-4 bg-gray-50 flex flex-row justify-between items-start">
-              <CardTitle className="text-base font-medium truncate">{result.title}</CardTitle>
-              {result.source && <Badge className={`ml-2 ${getSourceColor(result.source)}`}>{result.source}</Badge>}
-            </CardHeader>
-            <CardContent className="py-3 px-4">
-              <p className="text-sm text-gray-600 mb-2 line-clamp-2">{result.description}</p>
-              <div className="flex items-center text-blue-600 mb-2">
-                <ExternalLink className="h-4 w-4 mr-1" />
-                <a
-                  href={result.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm truncate hover:underline"
-                >
-                  {result.url}
-                </a>
-              </div>
-
-              {/* Brave Search固有の追加情報 - オプションのプロパティを安全に処理 */}
-              {result.source?.includes("Brave") && (
-                <div className="mt-2 text-xs text-gray-500 flex flex-wrap gap-2">
-                  {result.favicon && (
-                    <span className="flex items-center">
-                      <img
-                        src={result.favicon || "/placeholder.svg"}
-                        alt="favicon"
-                        className="w-4 h-4 mr-1"
-                        onError={(e) => {
-                          // 画像読み込みエラー時に代替画像を表示
-                          e.currentTarget.src = "/generic-icon.png"
-                        }}
-                      />
-                    </span>
-                  )}
-                  {result.age && (
-                    <span className="flex items-center">
-                      <Clock className="h-3 w-3 mr-1" />
-                      {result.age}
-                    </span>
-                  )}
-                  {result.publishedTime && (
-                    <span className="flex items-center">
-                      <Clock className="h-3 w-3 mr-1" />
-                      {new Date(result.publishedTime).toLocaleDateString()}
-                    </span>
-                  )}
-                  {result.publisher && (
-                    <span className="flex items-center">
-                      <span className="font-medium">{result.publisher}</span>
-                    </span>
-                  )}
-                  {result.isFamily !== undefined && (
-                    <Badge
-                      className={result.isFamily ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}
+            <CardContent className="p-0">
+              <div className="p-4">
+                <div className="flex items-start justify-between">
+                  <h3 className="text-base font-medium line-clamp-2 flex-1">
+                    <a
+                      href={result.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline flex items-center"
                     >
-                      {result.isFamily ? "ファミリーフレンドリー" : "成人向け"}
-                    </Badge>
-                  )}
+                      {result.title}
+                      <ExternalLink className="h-3 w-3 ml-1 inline-flex" />
+                    </a>
+                  </h3>
+                  <Button
+                    variant={selectedUrls.has(result.url) ? "default" : "outline"}
+                    size="sm"
+                    className="ml-2 h-8 w-8 p-0 flex-shrink-0"
+                    onClick={() => toggleUrlSelection(result.url)}
+                  >
+                    {selectedUrls.has(result.url) ? <Check className="h-4 w-4" /> : <span className="text-xs">+</span>}
+                  </Button>
                 </div>
-              )}
+                <div className="text-sm text-green-700 mt-1 break-all">{result.url}</div>
+                {result.description && <p className="text-sm text-gray-600 mt-2 line-clamp-3">{result.description}</p>}
+                {(result.source || result.confidence) && (
+                  <div className="flex items-center mt-2 text-xs text-gray-500">
+                    {result.source && <span className="mr-2">ソース: {result.source}</span>}
+                    {result.confidence && <span>信頼度: {(result.confidence * 100).toFixed(0)}%</span>}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         ))}
       </div>
-
-      {results.length > 5 && (
-        <Button variant="outline" onClick={() => setShowAll(!showAll)} className="w-full mt-2">
-          {showAll ? (
-            <>
-              <ChevronUp className="h-4 w-4 mr-2" />
-              結果を折りたたむ
-            </>
-          ) : (
-            <>
-              <ChevronDown className="h-4 w-4 mr-2" />
-              すべての結果を表示 ({results.length}件)
-            </>
-          )}
-        </Button>
-      )}
     </div>
   )
 }

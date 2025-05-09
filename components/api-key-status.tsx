@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Loader2, AlertCircle, CheckCircle } from "lucide-react"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { useEffect, useState } from "react"
+import { Card, CardContent } from "@/components/ui/card"
+import { CheckCircle, XCircle, Loader2 } from "lucide-react"
 
 interface ApiKeyStatusProps {
   apiName: string
@@ -14,56 +14,57 @@ export function ApiKeyStatus({ apiName, checkEndpoint }: ApiKeyStatusProps) {
     configured: boolean
     message: string
   } | null>(null)
-  const [isChecking, setIsChecking] = useState(true)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const checkApiKey = async () => {
       try {
+        setIsLoading(true)
+        setError(null)
+
         const response = await fetch(checkEndpoint)
+
+        // レスポンスがJSONかどうかを確認
+        const contentType = response.headers.get("content-type")
+        if (!contentType || !contentType.includes("application/json")) {
+          throw new Error(`予期しないレスポンス形式: ${contentType}`)
+        }
+
         const data = await response.json()
         setStatus(data)
       } catch (error) {
         console.error(`Error checking ${apiName} API key:`, error)
+        setError(error instanceof Error ? error.message : "Unknown error")
         setStatus({
           configured: false,
-          message: `Error checking ${apiName} API key configuration`,
+          message: `APIキーの確認中にエラーが発生しました`,
         })
       } finally {
-        setIsChecking(false)
+        setIsLoading(false)
       }
     }
 
     checkApiKey()
   }, [apiName, checkEndpoint])
 
-  if (isChecking) {
-    return (
-      <div className="flex items-center space-x-2 text-gray-500">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        <span className="text-sm">{apiName} APIキーを確認中...</span>
-      </div>
-    )
-  }
-
-  if (!status) {
-    return null
-  }
-
-  if (status.configured) {
-    return (
-      <Alert className="bg-green-50 border-green-200">
-        <CheckCircle className="h-4 w-4 text-green-600" />
-        <AlertTitle className="text-green-800">{apiName} APIキー設定済み</AlertTitle>
-        <AlertDescription className="text-green-700">{status.message}</AlertDescription>
-      </Alert>
-    )
-  }
-
   return (
-    <Alert variant="destructive">
-      <AlertCircle className="h-4 w-4" />
-      <AlertTitle>{apiName} APIキー未設定</AlertTitle>
-      <AlertDescription>{status.message}</AlertDescription>
-    </Alert>
+    <Card className={`border ${status?.configured ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
+      <CardContent className="p-3 flex items-center">
+        {isLoading ? (
+          <Loader2 className="h-5 w-5 text-gray-400 animate-spin mr-2" />
+        ) : status?.configured ? (
+          <CheckCircle className="h-5 w-5 text-green-600 mr-2" />
+        ) : (
+          <XCircle className="h-5 w-5 text-red-600 mr-2" />
+        )}
+        <div>
+          <div className="text-sm font-medium">{apiName} API</div>
+          <div className="text-xs text-gray-600">
+            {error ? `エラー: ${error}` : status?.message || "APIキーの状態を確認中..."}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
